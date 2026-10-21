@@ -1,0 +1,169 @@
+#!/usr/bin/python3
+# aria-browse — cliente del puente Aria (TCP local con token)
+# Uso:
+#   aria-browse ping
+#   aria-browse list_tabs
+#   aria-browse open_tab https://example.com [--no-active]
+#   aria-browse activate_tab <tabId>
+#   aria-browse close_tab <tabId>
+#   aria-browse get_page [tabId]
+#   aria-browse extract <selector> [tabId] [--attr href] [--limit 100]
+#   aria-browse click --selector <sel> [--tab <id>]
+#   aria-browse click --text <texto> [--tab <id>]
+#   aria-browse fill <selector> <valor> [tabId]
+#   aria-browse scroll [tabId] [--y 500] [--selector <sel>]
+#   aria-browse screenshot [tabId]   (devuelve la ruta del PNG guardado)
+#   aria-browse events [-n 50]       (lee activity.jsonl)
+import json, os, socket, sys, pathlib
+
+HOME = pathlib.Path.home()
+BRIDGE = HOME / ".aria" / "bridge.json"
+TOKEN = (HOME / ".aria" / "bridge.token").read_text().strip()
+ACTIVITY = HOME / ".aria" / "activity.jsonl"
+
+
+def fail(msg, code=2):
+    print(f"ERROR: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def rpc(cmd, params=None, timeout=30.0):
+    if not BRIDGE.exists():
+        fail("bridge.json no existe: Chrome no tiene la extensión Aria activa")
+    cfg = json.loads(BRIDGE.read_text())
+    try:
+        s = socket.create_connection(("127.0.0.1", cfg["port"]), timeout=5)
+    except OSError as e:
+        fail(f"no hay puente en 127.0.0.1:{cfg['port']} ({e})")
+    s.settimeout(timeout)
+    req = {"token": TOKEN, "id": 1, "cmd": cmd, "params": params or {}}
+    s.sendall((json.dumps(req) + "\n").encode())
+    buf = b""
+    resp = None
+    while True:  # saltar eventos broadcast (nav...) hasta la respuesta con id
+        while b"\n" not in buf:
+            try:
+                chunk = s.recv(65536)
+            except socket.timeout:
+                fail(f"timeout esperando '{cmd}'")
+            if not chunk:
+                fail("el puente cerró la conexión")
+            buf += chunk
+        line, buf = buf.split(b"\n", 1)
+        obj = json.loads(line)
+        if obj.get("id") == req["id"] and "event" not in obj:
+            resp = obj
+            break
+    s.close()
+    if not resp.get("ok"):
+        fail(resp.get("error", "error desconocido"), 1)
+    return resp.get("data")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        fail("sin comando")
+    cmd, rest = args[0], args[1:]
+
+    def opt(flag, default=None):
+        if flag in rest:
+            i = rest.index(flag)
+            if i + 1 >= len(rest):
+                fail(f"{flag} requiere valor")
+            return rest[i + 1]
+        return default
+
+    def pos(idx):
+        return rest[idx] if idx < len(rest) and not rest[idx].startswith("--") else None
+
+    def positional():
+        out, skip = [], False
+        for a in rest:
+            if skip:
+                skip = False
+                continue
+            if a.startswith("--"):
+                if a in ("--attr", "--limit", "--y", "--selector", "--tab", "--text"):
+                    skip = True
+                continue
+            out.append(a)
+        return out
+
+    if cmd == "ping":
+        d = rpc("ping")
+    elif cmd == "list_tabs":
+        d = rpc("list_tabs")
+    elif cmd == "open_tab":
+        url = pos(0) or fail("falta url")
+        d = rpc("open_tab", {"url": url, "active": "--no-active" not in rest})
+    elif cmd == "activate_tab":
+        d = rpc("activate_tab", {"tabId": int(pos(0) or fail("falta tabId"))})
+    elif cmd == "close_tab":
+        d = rpc("close_tab", {"tabId": int(pos(0) or fail("falta tabId"))})
+    elif cmd == "get_page":
+        p = positional()
+        d = rpc("get_page", {"tabId": int(p[0]) if p else None})
+    elif cmd == "extract":
+        p = positional()
+        if not p:
+            fail("falta selector")
+        params = {
+            "selector": p[0],
+            "tabId": int(p[1]) if len(p) > 1 else None,
+            "attr": opt("--attr"),
+            "limit": int(opt("--limit", 500)),
+        }
+        d = rpc("extract", params)
+    elif cmd == "click":
+        params = {"selector": opt("--selector"), "text": opt("--text")}
+        t = opt("--tab")
+        params["tabId"] = int(t) if t else None
+        if not params["selector"] and not params["text"]:
+            p = positional()
+            if p:
+                params["selector"] = p[0]
+            else:
+                fail("click necesita --selector o --text")
+        d = rpc("click", params)
+    elif cmd == "fill":
+        p = positional()
+        if len(p) < 2:
+            fail("falta selector y valor")
+        d = rpc(
+            "fill",
+            {
+                "selector": p[0],
+                "value": p[1],
+                "tabId": int(p[2]) if len(p) > 2 else None,
+            },
+        )
+    elif cmd == "scroll":
+        p = positional()
+        d = rpc(
+            "scroll",
+            {
+                "tabId": int(p[0]) if p else None,
+                "y": int(opt("--y", 0)),
+                "selector": opt("--selector"),
+            },
+        )
+    elif cmd == "screenshot":
+        p = positional()
+        d = rpc("screenshot", {"tabId": int(p[0]) if p else None}, timeout=45.0)
+    elif cmd == "events":
+        n = int(opt("-n", 50))
+        if not ACTIVITY.exists():
+            print("[]")
+            return
+        lines = ACTIVITY.read_text().splitlines()[-n:]
+        d = [json.loads(x) for x in lines if x.strip()]
+    else:
+        fail(f"comando desconocido: {cmd}")
+
+    json.dump(d if d is not None else None, sys.stdout, ensure_ascii=False, indent=2)
+    print()
+
+
+if __name__ == "__main__":
+    main()

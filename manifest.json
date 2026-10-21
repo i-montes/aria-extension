@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Aria",
+  "version": "0.1.0",
+  "description": "Aria en tu navegador: observa, abre e interactúa con pestañas sin activación manual.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAz6ZvgKGGBW5QJbQBzrr74Y5/412wDAvzxfOzP4usE81+1SHzesLV3lZ4JoBwYn8jGb2kzCO21wdUWSpZJF/dtpENAFgD/gzk9Ehbsw5gvD4+9n79aGWA7/ajwvdr3oHl5sD3DYJu+CYYKDz/11vKqMMhyMzaM+2qasGkx71/dH458di6mFb+IQ2mDNUb+P0ttUpmxi7ALlurZVVU3NwOexZxaX4vkQdfZTDIknpls/HXb4JFkIMOkhYzt/F/Cskjbspfg0QfN3rPVZ7bnxoP0zD76xTYR0NhQ95k09rQHLePDKwHqcpfZLDiRhXFvl+fAKZ9eUjjHHxNVTmhyv7uLwIDAQAB",
+  "minimum_chrome_version": "116",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "alarms",
+    "nativeMessaging",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "Aria (sin configuración: funciona automáticamente)"
+  },
+  "icons": {
+    "128": "icon-128.png"
+  }
+}
